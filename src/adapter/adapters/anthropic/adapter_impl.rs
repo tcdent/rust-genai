@@ -488,6 +488,7 @@ impl AnthropicAdapter {
 									}));
 								}
 								ContentPart::ThoughtSignature(_) => {}
+								ContentPart::Thinking(_) => {}
 							}
 						}
 						let values = apply_cache_control_to_parts(is_cache_control, values);
@@ -495,14 +496,24 @@ impl AnthropicAdapter {
 					}
 				}
 
-				// Assistant can mix text and tool_use entries.
+				// Assistant can mix text, thinking, and tool_use entries.
 				ChatRole::Assistant => {
 					let mut values: Vec<Value> = Vec::new();
 					let mut has_tool_use = false;
 					let mut has_text = false;
+					let mut has_thinking = false;
 
 					for part in msg.content {
 						match part {
+							ContentPart::Thinking(thinking) => {
+								has_thinking = true;
+								// Thinking blocks must be passed back with signature for tool use
+								values.push(json!({
+									"type": "thinking",
+									"thinking": thinking.thinking,
+									"signature": thinking.signature,
+								}));
+							}
 							ContentPart::Text(text) => {
 								has_text = true;
 								values.push(json!({"type": "text", "text": text}));
@@ -524,7 +535,7 @@ impl AnthropicAdapter {
 						}
 					}
 
-					if !has_tool_use && has_text && !is_cache_control && values.len() == 1 {
+					if !has_tool_use && !has_thinking && has_text && !is_cache_control && values.len() == 1 {
 						// Optimize to simple string when it's only one text part and no cache control.
 						let text = values
 							.first()

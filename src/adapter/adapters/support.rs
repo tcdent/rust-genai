@@ -2,7 +2,7 @@
 //! It should be private to the `crate::adapter::adapters` module.
 
 use crate::ModelIden;
-use crate::chat::{ChatOptionsSet, Usage};
+use crate::chat::{ChatOptionsSet, Thinking, Usage};
 use crate::resolver::AuthData;
 use crate::{Error, Result};
 
@@ -47,6 +47,8 @@ pub struct StreamerCapturedData {
 	pub reasoning_content: Option<String>,
 	pub tool_calls: Option<Vec<crate::chat::ToolCall>>,
 	pub thought_signatures: Option<Vec<String>>,
+	/// Captured thinking blocks with content and signatures (Anthropic)
+	pub thinking_blocks: Option<Vec<Thinking>>,
 }
 
 // endregion: --- Streamer Captured Data

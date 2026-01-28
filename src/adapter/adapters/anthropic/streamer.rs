@@ -1,6 +1,6 @@
 use crate::adapter::adapters::support::{StreamerCapturedData, StreamerOptions};
 use crate::adapter::inter_stream::{InterStreamEnd, InterStreamEvent};
-use crate::chat::{ChatOptionsSet, ToolCall, Usage};
+use crate::chat::{ChatOptionsSet, Thinking, ToolCall, Usage};
 use crate::webc::{Event, EventSourceStream};
 use crate::{Error, ModelIden, Result};
 use serde_json::{Map, Value};
@@ -23,7 +23,7 @@ pub struct AnthropicStreamer {
 enum InProgressBlock {
 	Text,
 	ToolUse { id: String, name: String, input: String },
-	Thinking,
+	Thinking { content: String, signature: String },
 }
 
 impl AnthropicStreamer {
@@ -71,7 +71,12 @@ impl futures::Stream for AnthropicStreamer {
 
 							match data.x_get_str("/content_block/type") {
 								Ok("text") => self.in_progress_block = InProgressBlock::Text,
-								Ok("thinking") => self.in_progress_block = InProgressBlock::Thinking,
+								Ok("thinking") => {
+									self.in_progress_block = InProgressBlock::Thinking {
+										content: String::new(),
+										signature: String::new(),
+									}
+								}
 								Ok("tool_use") => {
 									self.in_progress_block = InProgressBlock::ToolUse {
 										id: data.x_take("/content_block/id")?,
@@ -114,9 +119,12 @@ impl futures::Stream for AnthropicStreamer {
 									input.push_str(data.x_get_str("/delta/partial_json")?);
 									continue;
 								}
-								InProgressBlock::Thinking => {
+								InProgressBlock::Thinking { content: thinking_content, signature: thinking_signature } => {
+									// Handle thinking_delta
 									if let Ok(thinking) = data.x_take::<String>("/delta/thinking") {
-										// Add to the captured_thinking if chat options say so
+										thinking_content.push_str(&thinking);
+
+										// Add to the captured_reasoning if chat options say so
 										if self.options.capture_reasoning_content {
 											match self.captured_data.reasoning_content {
 												Some(ref mut r) => r.push_str(&thinking),
@@ -125,17 +133,16 @@ impl futures::Stream for AnthropicStreamer {
 										}
 
 										return Poll::Ready(Some(Ok(InterStreamEvent::ReasoningChunk(thinking))));
-									} else if let Ok(signature) = data.x_take::<String>("/delta/signature") {
-										return Poll::Ready(Some(Ok(InterStreamEvent::ThoughtSignatureChunk(
-											signature,
-										))));
-									} else {
-										// If it is thinking but no thinking or signature field, we log and skip.
-										tracing::warn!(
-											"content_block_delta for thinking block but no thinking or signature found: {data:?}"
-										);
+									}
+
+									// Handle signature_delta
+									if let Ok(sig) = data.x_take::<String>("/delta/signature") {
+										thinking_signature.push_str(&sig);
+										// Don't emit ThoughtSignatureChunk since we're capturing the full block
 										continue;
 									}
+
+									continue;
 								}
 							}
 						}
@@ -164,6 +171,17 @@ impl futures::Stream for AnthropicStreamer {
 									}
 
 									return Poll::Ready(Some(Ok(InterStreamEvent::ToolCallChunk(tc))));
+								}
+								InProgressBlock::Thinking { content, signature } => {
+									// Capture thinking block with content and signature
+									let thinking = Thinking {
+										thinking: content,
+										signature,
+									};
+									match self.captured_data.thinking_blocks {
+										Some(ref mut blocks) => blocks.push(thinking),
+										None => self.captured_data.thinking_blocks = Some(vec![thinking]),
+									}
 								}
 								_ => {
 									// no-op for remaining block types
@@ -200,6 +218,7 @@ impl futures::Stream for AnthropicStreamer {
 								captured_reasoning_content: self.captured_data.reasoning_content.take(),
 								captured_tool_calls: self.captured_data.tool_calls.take(),
 								captured_thought_signatures: None,
+								captured_thinking_blocks: self.captured_data.thinking_blocks.take(),
 							};
 
 							// TODO: Need to capture the data as needed

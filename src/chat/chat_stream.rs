@@ -1,5 +1,5 @@
 use crate::adapter::inter_stream::{InterStreamEnd, InterStreamEvent};
-use crate::chat::{ChatMessage, ContentPart, MessageContent, ToolCall, Usage};
+use crate::chat::{ChatMessage, ContentPart, MessageContent, Thinking, ToolCall, Usage};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -115,6 +115,10 @@ pub struct StreamEnd {
 
 	/// Captured reasoning content if `ChatOptions.capture_reasoning` is enabled.
 	pub captured_reasoning_content: Option<String>,
+
+	/// Captured thinking blocks with content and signatures (Anthropic).
+	/// These are automatically captured when extended thinking is enabled.
+	pub captured_thinking_blocks: Option<Vec<Thinking>>,
 }
 
 impl From<InterStreamEnd> for StreamEnd {
@@ -171,6 +175,7 @@ impl From<InterStreamEnd> for StreamEnd {
 			captured_usage: inter_end.captured_usage,
 			captured_content,
 			captured_reasoning_content: inter_end.captured_reasoning_content,
+			captured_thinking_blocks: inter_end.captured_thinking_blocks,
 		}
 	}
 }
@@ -260,6 +265,16 @@ impl StreamEnd {
 			tool_calls,
 			thought_signatures,
 		))
+	}
+
+	/// Returns captured thinking blocks, if any.
+	pub fn captured_thinking_blocks(&self) -> Option<&Vec<Thinking>> {
+		self.captured_thinking_blocks.as_ref()
+	}
+
+	/// Consumes `self` and returns all captured thinking blocks, if any.
+	pub fn captured_into_thinking_blocks(self) -> Option<Vec<Thinking>> {
+		self.captured_thinking_blocks
 	}
 }
 
