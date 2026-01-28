@@ -453,6 +453,7 @@ impl OpenAIAdapter {
 								ContentPart::ToolCall(_) => (),
 								ContentPart::ToolResponse(_) => (),
 								ContentPart::ThoughtSignature(_) => (),
+								ContentPart::Thinking(_) => (),
 							}
 						}
 						messages.push(json! ({"role": "user", "content": values}));
@@ -483,6 +484,7 @@ impl OpenAIAdapter {
 							ContentPart::Binary(_) => (),
 							ContentPart::ToolResponse(_) => (),
 							ContentPart::ThoughtSignature(_) => {}
+								ContentPart::Thinking(_) => {}
 						}
 					}
 					let content = texts.join("\n\n");

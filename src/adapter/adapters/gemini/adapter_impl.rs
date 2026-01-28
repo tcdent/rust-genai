@@ -558,6 +558,10 @@ impl GeminiAdapter {
 									"thoughtSignature": thought
 								}));
 							}
+							ContentPart::Thinking(_) => {
+								// TODO: Thinking blocks are currently Anthropic-specific.
+								// Consider standardizing on Thinking struct for all providers.
+							}
 						}
 					}
 
@@ -625,6 +629,13 @@ impl GeminiAdapter {
 									parts_values.push(json!({"thoughtSignature": thought}));
 								}
 							}
+							ContentPart::Thinking(_) => {
+								// TODO: Thinking blocks are currently Anthropic-specific.
+								// Consider standardizing on Thinking struct for all providers.
+								if let Some(thought) = pending_thought.take() {
+									parts_values.push(json!({"thoughtSignature": thought}));
+								}
+							}
 						}
 					}
 					if let Some(thought) = pending_thought {
@@ -661,6 +672,10 @@ impl GeminiAdapter {
 								parts_values.push(json!({
 									"thoughtSignature": thought
 								}));
+							}
+							ContentPart::Thinking(_) => {
+								// TODO: Thinking blocks are currently Anthropic-specific.
+								// Consider standardizing on Thinking struct for all providers.
 							}
 							_ => {
 								return Err(Error::MessageContentTypeNotSupported {

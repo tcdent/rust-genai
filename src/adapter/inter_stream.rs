@@ -5,7 +5,7 @@
 //!
 //! NOTE: This might be removed at some point as it may not be needed, and we could go directly to the GenAI stream.
 
-use crate::chat::Usage;
+use crate::chat::{Thinking, Usage};
 
 #[derive(Debug, Default)]
 pub struct InterStreamEnd {
@@ -23,6 +23,10 @@ pub struct InterStreamEnd {
 
 	// When `ChatOptions..capture_thought_signatures == true` (implied or explicit)
 	pub captured_thought_signatures: Option<Vec<String>>,
+
+	/// Captured thinking blocks with content and signatures (Anthropic).
+	/// These are automatically captured when extended thinking is enabled.
+	pub captured_thinking_blocks: Option<Vec<Thinking>>,
 }
 
 /// Intermediary StreamEvent
