@@ -9,7 +9,9 @@ use crate::Headers;
 use crate::chat::chat_req_response_format::ChatResponseFormat;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::ops::Deref;
+use std::sync::Arc;
 
 /// Options considered by all `Client::exec_*` chat calls.
 ///
@@ -68,6 +70,16 @@ pub struct ChatOptions {
 
 	/// Additional HTTP headers to include with the request.
 	pub extra_headers: Option<Headers>,
+
+	/// Additional key-value pairs to merge into the request body.
+	/// Provider-specific; merged at the top level of the JSON payload.
+	pub extra_body: Option<Value>,
+
+	/// Custom body serializer for overriding JSON serialization.
+	/// When `None`, the default `serde_json::to_string` is used.
+	/// See [`BodySerializer`] for details.
+	#[serde(skip)]
+	pub body_serializer: Option<DynBodySerializer>,
 }
 
 /// Chainable Setters
@@ -168,6 +180,22 @@ impl ChatOptions {
 		self
 	}
 
+	/// Sets additional key-value pairs to merge into the request body.
+	pub fn with_extra_body(mut self, value: Value) -> Self {
+		self.extra_body = Some(value);
+		self
+	}
+
+	/// Sets a custom body serializer that replaces the default JSON serialization.
+	///
+	/// The serializer receives the fully constructed `serde_json::Value` payload
+	/// and must return the serialized HTTP body string. This allows post-processing
+	/// the serialized body (e.g., injecting computed hashes, reordering fields).
+	pub fn with_body_serializer(mut self, serializer: impl BodySerializer + 'static) -> Self {
+		self.body_serializer = Some(DynBodySerializer::new(serializer));
+		self
+	}
+
 	// -- Deprecated
 
 	/// Deprecated: use `with_response_format(ChatResponseFormat::JsonMode)`.
@@ -193,6 +221,9 @@ pub enum ReasoningEffort {
 	Medium,
 	High,
 	Budget(u32),
+	/// Adaptive thinking: the model decides its own thinking budget.
+	/// Used by Opus 4.6 with the `adaptive-thinking-2026-01-28` beta.
+	Adaptive,
 
 	// Legacy reasoning for <= gpt-5
 	Minimal,
@@ -207,6 +238,7 @@ impl ReasoningEffort {
 			ReasoningEffort::Medium => "medium",
 			ReasoningEffort::High => "high",
 			ReasoningEffort::Budget(_) => "budget",
+			ReasoningEffort::Adaptive => "adaptive",
 			// Legacy
 			ReasoningEffort::Minimal => "minimal",
 		}
@@ -220,6 +252,7 @@ impl ReasoningEffort {
 			ReasoningEffort::Medium => Some("medium"),
 			ReasoningEffort::High => Some("high"),
 			ReasoningEffort::Budget(_) => None,
+			ReasoningEffort::Adaptive => Some("adaptive"),
 			// Legacy
 			ReasoningEffort::Minimal => Some("minimal"),
 		}
@@ -234,6 +267,7 @@ impl ReasoningEffort {
 			"high" => Some(ReasoningEffort::High),
 			// legacy
 			"minimal" => Some(ReasoningEffort::Minimal),
+			"adaptive" => Some(ReasoningEffort::Adaptive),
 			_ => None,
 		}
 	}
@@ -259,6 +293,7 @@ impl std::fmt::Display for ReasoningEffort {
 			ReasoningEffort::Medium => write!(f, "medium"),
 			ReasoningEffort::High => write!(f, "high"),
 			ReasoningEffort::Budget(n) => write!(f, "{n}"),
+			ReasoningEffort::Adaptive => write!(f, "adaptive"),
 			// Legacy
 			ReasoningEffort::Minimal => write!(f, "minimal"),
 		}
@@ -537,6 +572,18 @@ impl ChatOptionsSet<'_, '_> {
 			.or_else(|| self.client.and_then(|client| client.extra_headers.as_ref()))
 	}
 
+	pub fn extra_body(&self) -> Option<&Value> {
+		self.chat
+			.and_then(|chat| chat.extra_body.as_ref())
+			.or_else(|| self.client.and_then(|client| client.extra_body.as_ref()))
+	}
+
+	pub fn body_serializer(&self) -> Option<&DynBodySerializer> {
+		self.chat
+			.and_then(|chat| chat.body_serializer.as_ref())
+			.or_else(|| self.client.and_then(|client| client.body_serializer.as_ref()))
+	}
+
 	/// Returns true only if there is a ChatResponseFormat::JsonMode
 	#[deprecated(note = "Use .response_format()")]
 	#[allow(unused)]
@@ -550,3 +597,59 @@ impl ChatOptionsSet<'_, '_> {
 }
 
 // endregion: --- ChatOptionsSet
+
+// region:    --- BodySerializer
+
+/// Trait for customizing how the request body payload is serialized to a string
+/// before being sent over HTTP.
+///
+/// The default behavior (when no serializer is set) is `serde_json::to_string`.
+/// Implement this to post-process the serialized JSON — for example, to inject
+/// computed hashes or transform fields after the full payload is assembled.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use genai::chat::BodySerializer;
+/// use serde_json::Value;
+///
+/// struct CchSerializer { seed: u64 }
+///
+/// impl BodySerializer for CchSerializer {
+///     fn serialize(&self, payload: &Value) -> Result<String, String> {
+///         let body = serde_json::to_string(payload).map_err(|e| e.to_string())?;
+///         Ok(apply_cch(&body, self.seed))
+///     }
+/// }
+/// ```
+pub trait BodySerializer: Send + Sync {
+	/// Serialize the given JSON value payload into the final HTTP body string.
+	fn serialize(&self, payload: &Value) -> std::result::Result<String, String>;
+}
+
+/// Type-erased wrapper around a [`BodySerializer`] for use in [`ChatOptions`].
+///
+/// This provides `Clone` and `Debug` implementations so it can be stored
+/// alongside other `ChatOptions` fields without breaking derives.
+#[derive(Clone)]
+pub struct DynBodySerializer(Arc<dyn BodySerializer>);
+
+impl DynBodySerializer {
+	/// Wrap a concrete [`BodySerializer`] implementation.
+	pub fn new(serializer: impl BodySerializer + 'static) -> Self {
+		Self(Arc::new(serializer))
+	}
+
+	/// Delegate to the inner serializer.
+	pub fn serialize(&self, payload: &Value) -> std::result::Result<String, String> {
+		self.0.serialize(payload)
+	}
+}
+
+impl std::fmt::Debug for DynBodySerializer {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("DynBodySerializer(..)")
+	}
+}
+
+// endregion: --- BodySerializer

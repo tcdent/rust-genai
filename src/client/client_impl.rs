@@ -85,7 +85,7 @@ impl Client {
 
 		let web_res =
 			self.web_client()
-				.do_post(&url, &headers, payload)
+				.do_post(&url, &headers, payload, options_set.body_serializer())
 				.await
 				.map_err(|webc_error| Error::WebModelCall {
 					model_iden: model.clone(),
@@ -137,7 +137,7 @@ impl Client {
 
 		let reqwest_builder = self
 			.web_client()
-			.new_req_builder(&url, &headers, payload)
+			.new_req_builder(&url, &headers, payload, options_set.body_serializer())
 			.map_err(|webc_error| Error::WebModelCall {
 				model_iden: model.clone(),
 				webc_error,
@@ -190,7 +190,7 @@ impl Client {
 
 		let web_res =
 			self.web_client()
-				.do_post(&url, &headers, payload)
+				.do_post(&url, &headers, payload, None)
 				.await
 				.map_err(|webc_error| Error::WebModelCall {
 					model_iden: model.clone(),

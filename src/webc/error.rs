@@ -21,6 +21,9 @@ pub enum Error {
 		headers: Box<HeaderMap>,
 	},
 
+	#[display("Body serialization failed: {_0}")]
+	BodySerialization(String),
+
 	// -- Utils
 	#[display("JSON value extension error: {_0}")]
 	#[from]

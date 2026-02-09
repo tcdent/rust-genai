@@ -1,4 +1,5 @@
 use crate::Headers;
+use crate::chat::DynBodySerializer;
 use crate::webc::{Error, Result};
 use reqwest::header::HeaderMap;
 use reqwest::{Method, RequestBuilder, StatusCode};
@@ -45,8 +46,14 @@ impl WebClient {
 		Ok(response)
 	}
 
-	pub async fn do_post(&self, url: &str, headers: &Headers, content: Value) -> Result<WebResponse> {
-		let reqwest_builder = self.new_req_builder(url, headers, content)?;
+	pub async fn do_post(
+		&self,
+		url: &str,
+		headers: &Headers,
+		content: Value,
+		body_serializer: Option<&DynBodySerializer>,
+	) -> Result<WebResponse> {
+		let reqwest_builder = self.new_req_builder(url, headers, content, body_serializer)?;
 
 		let reqwest_res = reqwest_builder.send().await?;
 
@@ -55,14 +62,39 @@ impl WebClient {
 		Ok(response)
 	}
 
-	pub fn new_req_builder(&self, url: &str, headers: &Headers, content: Value) -> Result<RequestBuilder> {
+	pub fn new_req_builder(
+		&self,
+		url: &str,
+		headers: &Headers,
+		content: Value,
+		body_serializer: Option<&DynBodySerializer>,
+	) -> Result<RequestBuilder> {
+		// Dump request to /tmp for debugging
+		if std::env::var("GENAI_DUMP_REQUESTS").is_ok() {
+			let dump = serde_json::json!({
+				"url": url,
+				"headers": headers.iter().map(|(k,v)| (k.clone(), v.clone())).collect::<std::collections::HashMap<_,_>>(),
+				"body": content,
+			});
+			let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+			let _ = std::fs::write(format!("/tmp/genai_req_{ts}.json"), serde_json::to_string_pretty(&dump).unwrap_or_default());
+		}
+
 		let method = Method::POST;
 
 		let mut reqwest_builder = self.reqwest_client.request(method, url);
 		for (k, v) in headers.iter() {
 			reqwest_builder = reqwest_builder.header(k, v);
 		}
-		reqwest_builder = reqwest_builder.json(&content);
+
+		reqwest_builder = if let Some(serializer) = body_serializer {
+			let body = serializer.serialize(&content).map_err(Error::BodySerialization)?;
+			reqwest_builder
+				.header("content-type", "application/json")
+				.body(body)
+		} else {
+			reqwest_builder.json(&content)
+		};
 
 		Ok(reqwest_builder)
 	}

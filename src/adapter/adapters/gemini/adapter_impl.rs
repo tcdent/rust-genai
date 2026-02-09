@@ -41,6 +41,7 @@ fn insert_gemini_thinking_budget_value(payload: &mut Value, effort: &ReasoningEf
 		ReasoningEffort::Medium => Some(REASONING_MEDIUM),
 		ReasoningEffort::High => Some(REASONING_HIGH),
 		ReasoningEffort::Budget(budget) => Some(*budget),
+		ReasoningEffort::Adaptive => None, // Not supported by Gemini
 	};
 
 	if let Some(budget) = budget {

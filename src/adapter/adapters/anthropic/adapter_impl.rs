@@ -21,22 +21,34 @@ const REASONING_MEDIUM: u32 = 8000;
 const REASONING_HIGH: u32 = 24000;
 
 fn insert_anthropic_thinking_budget_value(payload: &mut Value, effort: &ReasoningEffort) -> Result<()> {
-	let thinking_budget = match effort {
-		ReasoningEffort::None => None,
-		ReasoningEffort::Budget(budget) => Some(*budget),
-		ReasoningEffort::Low | ReasoningEffort::Minimal => Some(REASONING_LOW),
-		ReasoningEffort::Medium => Some(REASONING_MEDIUM),
-		ReasoningEffort::High => Some(REASONING_HIGH),
-	};
-
-	if let Some(thinking_budget) = thinking_budget {
-		payload.x_insert(
-			"thinking",
-			json!({
-				"type": "enabled",
-				"budget_tokens": thinking_budget
-			}),
-		)?;
+	match effort {
+		ReasoningEffort::Adaptive => {
+			payload.x_insert(
+				"thinking",
+				json!({
+					"type": "adaptive"
+				}),
+			)?;
+		}
+		ReasoningEffort::None => {}
+		other => {
+			let thinking_budget = match other {
+				ReasoningEffort::Budget(budget) => Some(*budget),
+				ReasoningEffort::Low | ReasoningEffort::Minimal => Some(REASONING_LOW),
+				ReasoningEffort::Medium => Some(REASONING_MEDIUM),
+				ReasoningEffort::High => Some(REASONING_HIGH),
+				_ => None,
+			};
+			if let Some(thinking_budget) = thinking_budget {
+				payload.x_insert(
+					"thinking",
+					json!({
+						"type": "enabled",
+						"budget_tokens": thinking_budget
+					}),
+				)?;
+			}
+		}
 	}
 	Ok(())
 }
@@ -97,13 +109,18 @@ impl Adapter for AnthropicAdapter {
 	) -> Result<WebRequestData> {
 		let ServiceTarget { endpoint, auth, model } = target;
 
-		// -- url
-		let url = Self::get_service_url(&model, service_type, endpoint)?;
-
 		// -- Check if OAuth is being used (Authorization header present in extra_headers)
 		let has_oauth = options_set.extra_headers()
 			.map(|h| h.iter().any(|(k, _)| k.eq_ignore_ascii_case("authorization")))
 			.unwrap_or(false);
+
+		// -- url
+		let url = Self::get_service_url(&model, service_type, endpoint)?;
+		// TODO: Claude Code appends `?beta=true` for OAuth requests.
+		//       Might just be syntactic — unclear if it gates anything server-side.
+		// if has_oauth {
+		// 	url.push_str("?beta=true");
+		// }
 
 		// -- headers
 		let mut headers = if has_oauth {
@@ -230,6 +247,7 @@ impl Adapter for AnthropicAdapter {
 					// -- for now, will not set
 					ReasoningEffort::Budget(_) => "",
 					ReasoningEffort::None => "",
+					ReasoningEffort::Adaptive => "",
 				};
 				if !effort.is_empty() {
 					payload.x_insert(
@@ -282,6 +300,15 @@ impl Adapter for AnthropicAdapter {
 
 		if let Some(top_p) = options_set.top_p() {
 			payload.x_insert("top_p", top_p)?;
+		}
+
+		// -- Merge extra body params (provider-specific, e.g. research_preview_2026_02)
+		if let Some(extra_body) = options_set.extra_body() {
+			if let Value::Object(map) = extra_body {
+				for (key, value) in map {
+					payload.x_insert(key, value.clone())?;
+				}
+			}
 		}
 
 		Ok(WebRequestData { url, headers, payload })
