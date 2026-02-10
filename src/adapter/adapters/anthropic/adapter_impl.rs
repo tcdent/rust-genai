@@ -190,36 +190,6 @@ impl Adapter for AnthropicAdapter {
 		});
 
 		if let Some(system) = system {
-			// For OAuth mode, prepend the Claude Code identifier block
-			let system = if has_oauth {
-				// Build system array with Claude Code identifier first
-				let claude_code_block = json!({
-					"type": "text",
-					"text": "You are Claude Code, Anthropic's official CLI for Claude.",
-					"cache_control": {"type": "ephemeral"}
-				});
-
-				// Ensure the existing system is an array and prepend our block
-				match system {
-					Value::Array(mut arr) => {
-						arr.insert(0, claude_code_block);
-						Value::Array(arr)
-					}
-					Value::String(s) => {
-						// Convert string system to array format
-						json!([
-							claude_code_block,
-							{"type": "text", "text": s, "cache_control": {"type": "ephemeral"}}
-						])
-					}
-					other => {
-						// For any other format, wrap in array
-						json!([claude_code_block, other])
-					}
-				}
-			} else {
-				system
-			};
 			payload.x_insert("system", system)?;
 		}
 
